@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.2
+// @version      1.0.3
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
 // @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
@@ -21,6 +21,7 @@
   "use strict";
 
   const CHANNEL = "cx-ai-v1";
+  const SCRIPT_VERSION = "1.0.3";
   const SETTINGS_KEY = "cxai_settings_v1";
   const RUN_KEY = "cxai_run_state_v1";
   const MAX_STEPS = 100;
@@ -161,7 +162,13 @@
   }
 
   function optionKeyOf(element) {
-    const match = textOf(element).match(/^\s*([A-H])\s*[.、:：)）]?\s*$/i);
+    const source = textOf(element)
+      || element.getAttribute("data-option")
+      || element.getAttribute("data")
+      || element.getAttribute("data-value")
+      || element.getAttribute("value")
+      || "";
+    const match = source.match(/^\s*([A-H])\s*[.、:：)）]?\s*$/i);
     return match?.[1]?.toUpperCase() || "";
   }
 
@@ -222,6 +229,25 @@
         current = current.parentElement;
       }
     }
+    return Array.from(containers);
+  }
+
+  function discoverChaoxingHomeworkContainers() {
+    const containers = new Set();
+    const anchors = document.querySelectorAll(".mark_name,.answer_p,input[name^='answertype']");
+    anchors.forEach((anchor) => {
+      let current = anchor.parentElement;
+      while (current && current !== document.body) {
+        const hasStem = Boolean(current.querySelector(".mark_name"));
+        const optionCount = current.querySelectorAll(".answer_p").length;
+        const textControlCount = current.querySelectorAll(TEXT_CONTROL_SELECTOR).length;
+        if (hasStem && ((optionCount >= 2 && optionCount <= 12) || textControlCount > 0) && textOf(current).length <= 10000) {
+          containers.add(current);
+          break;
+        }
+        current = current.parentElement;
+      }
+    });
     return Array.from(containers);
   }
 
@@ -476,6 +502,7 @@
           && (container.querySelector(".answer_p") || container.querySelector(TEXT_CONTROL_SELECTOR));
         if (isVisible(container) && (isChaoxingHomework || container.querySelector(CONTROL_SELECTOR) || findCustomOptionRows(container).length >= 2)) candidates.add(container);
       });
+      discoverChaoxingHomeworkContainers().forEach((container) => candidates.add(container));
       discoverCustomQuestionContainers().forEach((container) => candidates.add(container));
       const minimal = Array.from(candidates).filter((candidate) => !Array.from(candidates).some((other) => other !== candidate && candidate.contains(other)));
       this.questionRefs.clear();
@@ -486,7 +513,25 @@
         this.questionRefs.set(record.serializable.questionId, record);
         questions.push(record.serializable);
       });
-      return { frameId: this.frameId, url: location.href, title: document.title, questions };
+      return {
+        frameId: this.frameId,
+        url: location.href,
+        title: document.title,
+        questions,
+        diagnostics: {
+          questionLi: document.querySelectorAll(".questionLi").length,
+          markName: document.querySelectorAll(".mark_name").length,
+          answerP: document.querySelectorAll(".answer_p").length,
+          answerType: document.querySelectorAll("input[name^='answertype']").length,
+          timu: document.querySelectorAll(".TiMu").length,
+          nativeControls: document.querySelectorAll(CONTROL_SELECTOR).length,
+          candidates: candidates.size,
+          minimalCandidates: minimal.length,
+          iframeCount: document.querySelectorAll("iframe").length,
+          iframeSources: Array.from(document.querySelectorAll("iframe")).map((frame) => frame.src || "(无 src)").slice(0, 5),
+          bodyTextLength: textOf(document.body).length,
+        },
+      };
     }
 
     async fill(questionId, answer) {
@@ -714,7 +759,7 @@
           .log { max-height: 150px; overflow: auto; margin-top: 7px; padding: 8px; background: #111827; color: #d1d5db; border-radius: 5px; font: 11px/1.5 Consolas,monospace; white-space: pre-wrap; }
         </style>
         <section class="panel">
-          <header><span class="mark">AI</span><h2>学习通答题助手</h2><button class="icon" id="collapse" title="折叠" aria-label="折叠">−</button></header>
+          <header><span class="mark">AI</span><h2>学习通答题助手 v${SCRIPT_VERSION}</h2><button class="icon" id="collapse" title="折叠" aria-label="折叠">−</button></header>
           <div class="body">
             <label>API Base URL<input id="baseUrl" value="${this.escape(settings.baseUrl)}" autocomplete="off"></label>
             <label>API Key<input id="apiKey" type="password" value="${this.escape(settings.apiKey)}" autocomplete="off"></label>
@@ -920,10 +965,29 @@
       const entries = Array.from(this.frames.keys());
       const settled = await Promise.allSettled(entries.map((frameId) => this.rpc(frameId, "SCAN")));
       const questions = [];
+      const diagnostics = [];
       settled.forEach((result, index) => {
-        if (result.status === "fulfilled") result.value.questions.forEach((question) => questions.push({ ...question, frameId: entries[index] }));
+        if (result.status === "fulfilled") {
+          result.value.questions.forEach((question) => questions.push({ ...question, frameId: entries[index] }));
+          diagnostics.push({ frameId: entries[index], url: result.value.url, ...result.value.diagnostics });
+        }
       });
+      this.lastScanDiagnostics = diagnostics;
       return questions;
+    }
+
+    logScanDiagnostics() {
+      const diagnostics = this.lastScanDiagnostics || [];
+      if (diagnostics.length === 0) {
+        this.log("扫描诊断：没有 iframe/page agent 返回结果");
+        return;
+      }
+      diagnostics.forEach((item) => {
+        let host = item.url;
+        try { host = new URL(item.url).host + new URL(item.url).pathname; } catch (_) {}
+        this.log(`扫描诊断 ${host}：questionLi=${item.questionLi} mark_name=${item.markName} answer_p=${item.answerP} answertype=${item.answerType} TiMu=${item.timu} controls=${item.nativeControls} candidates=${item.candidates}/${item.minimalCandidates} iframes=${item.iframeCount} bodyText=${item.bodyTextLength}`);
+        if (item.iframeSources?.length) this.log(`iframe：${item.iframeSources.join(" | ")}`);
+      });
     }
 
     async runLoop(runState) {
@@ -931,7 +995,10 @@
         if (this.cancelled) return;
         this.update(`正在扫描第 ${step + 1} 页…`);
         const questions = await this.scanAll();
-        if (questions.length === 0) throw new Error("当前页面未识别到可答题目，请确认已进入作业或测验页面");
+        if (questions.length === 0) {
+          this.logScanDiagnostics();
+          throw new Error("当前页面未识别到可答题目；请复制下方扫描诊断日志");
+        }
         const pageSignature = hashText(questions.map((question) => question.signature).sort().join("|"));
         if ((runState.seen || []).includes(pageSignature)) throw new Error("检测到重复页面，已停止以避免循环提交");
         runState.seen = [...(runState.seen || []), pageSignature].slice(-MAX_STEPS);

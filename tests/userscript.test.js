@@ -113,6 +113,11 @@ async function clickStart(page) {
 
 test.before(async () => {
   topServer = http.createServer((request, response) => {
+    if (request.url.startsWith("/empty")) {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><meta charset='utf-8'><title>Empty fixture</title><main>没有题目的测试页面</main><iframe src='about:blank'></iframe>");
+      return;
+    }
     if (request.url.startsWith("/timeout")) {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end("<!doctype html><meta charset='utf-8'><section class='question-item'><h3 class='question-title'>单选题：超时测试</h3><label><input type='radio' name='q'>A. A</label><label><input type='radio' name='q'>B. B</label></section>");
@@ -166,6 +171,8 @@ test("fills all common question types across an iframe and submits", async () =>
   await clickStart(page);
   await page.waitForFunction(() => document.documentElement.dataset.submitted === "true", { timeout: 15000 });
 
+  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.3/);
+
   assert.equal(await page.$eval("#single input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#multiple input:checked", (inputs) => inputs.map((input) => input.value)), ["A", "C"]);
   assert.equal(await page.$eval("#judgement input[value='A']", (input) => input.checked), true);
@@ -207,5 +214,22 @@ test("stops without filling or submitting when the API times out", async () => {
   }, { timeout: 8000 });
   assert.equal(await page.$eval("input:checked", (input) => Boolean(input)).catch(() => false), false);
   assert.notEqual(await page.evaluate(() => document.documentElement.dataset.submitted), "true");
+  await page.close();
+});
+
+test("prints selector and iframe diagnostics when no questions are found", async () => {
+  const page = await browser.newPage();
+  await installMockEnvironment(page, { autoSubmit: false });
+  await injectUserscript(page);
+  await page.goto("http://127.0.0.1:32101/empty", { waitUntil: "domcontentloaded" });
+  await clickStart(page);
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#cx-ai-panel-host")?.shadowRoot;
+    return root?.querySelector("#log")?.textContent.includes("扫描诊断");
+  }, { timeout: 8000 });
+  const log = await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("#log").textContent);
+  assert.match(log, /questionLi=0 mark_name=0 answer_p=0 answertype=0/);
+  assert.match(log, /iframes=1/);
+  assert.equal(await page.evaluate(() => globalThis.__mockApiBodies.length), 0);
   await page.close();
 });
