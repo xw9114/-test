@@ -1,0 +1,18 @@
+{
+  "name": "chaoxing",
+  "version": "1.0.0",
+  "description": "Chaoxing question collector and in-page AI answer userscript",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "collect": "node index.js",
+    "test": "node --check index.js && node --check chaoxing-ai.user.js && node --test tests/userscript.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "puppeteer": "^25.3.0"
+  }
+}
