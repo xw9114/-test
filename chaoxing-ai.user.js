@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.3
+// @version      1.0.4
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
 // @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
@@ -10,18 +10,23 @@
 // @match        *://*.chaoxing.cn/*
 // @match        *://*.chaoxing.net/*
 // @match        *://*.xueyinonline.com/*
+// @match        *://*.edu.cn/*
+// @match        *://*.nbdlib.cn/*
+// @match        *://*.hnsyu.net/*
+// @match        *://*.gdhkmooc.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      *
-// @run-at       document-start
+// @run-at       document-end
 // ==/UserScript==
 
 (function () {
   "use strict";
 
   const CHANNEL = "cx-ai-v1";
-  const SCRIPT_VERSION = "1.0.3";
+  const SCRIPT_VERSION = "1.0.4";
   const SETTINGS_KEY = "cxai_settings_v1";
   const RUN_KEY = "cxai_run_state_v1";
   const MAX_STEPS = 100;
@@ -430,14 +435,14 @@
   }
 
   class FrameAgent {
-    constructor() {
+    constructor({ announce = true } = {}) {
       this.frameId = randomId("frame");
       this.token = null;
       this.questionRefs = new Map();
       this.actionRefs = new Map();
       this.readyTimer = null;
       window.addEventListener("message", (event) => this.onMessage(event));
-      this.announce();
+      if (announce) this.announce();
     }
 
     announce() {
@@ -448,6 +453,11 @@
       send();
       this.readyTimer = setInterval(send, 1000);
       setTimeout(() => clearInterval(this.readyTimer), 30000);
+    }
+
+    initializeLocal(token) {
+      this.token = token;
+      clearInterval(this.readyTimer);
     }
 
     onMessage(event) {
@@ -858,11 +868,17 @@
       }
     }
 
+    registerLocalAgent(agent) {
+      agent.initializeLocal(this.token);
+      this.frames.set(agent.frameId, { localAgent: agent, source: window, origin: location.origin, url: location.href });
+    }
+
     onMessage(event) {
       const message = event.data;
       if (!message || message.channel !== CHANNEL) return;
       if (message.type === "FRAME_READY") {
         if (!message.frameId || !event.source) return;
+        if (this.frames.get(message.frameId)?.localAgent) return;
         this.frames.set(message.frameId, { source: event.source, origin: event.origin, url: message.url });
         event.source.postMessage({ channel: CHANNEL, type: "SESSION_INIT", token: this.token, frameId: message.frameId, requestId: randomId("init") }, "*");
         return;
@@ -881,6 +897,9 @@
     rpc(frameId, command, payload = {}, timeout = RPC_TIMEOUT) {
       const frame = this.frames.get(frameId);
       if (!frame) return Promise.reject(new Error("iframe 已失效"));
+      if (frame.localAgent) {
+        return Promise.resolve().then(() => frame.localAgent.handleCommand({ command, payload }));
+      }
       const requestId = randomId("rpc");
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -1200,6 +1219,11 @@
   }
 
   const isTop = window.top === window;
-  if (isTop) new Controller();
-  new FrameAgent();
+  if (isTop) {
+    const controller = new Controller();
+    const localAgent = new FrameAgent({ announce: false });
+    controller.registerLocalAgent(localAgent);
+  } else {
+    new FrameAgent();
+  }
 })();

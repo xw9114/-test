@@ -47,6 +47,10 @@ AI 网页脚本还包含以下停止保护：
 *.chaoxing.cn
 *.chaoxing.net
 *.xueyinonline.com
+*.edu.cn
+*.nbdlib.cn
+*.hnsyu.net
+*.gdhkmooc.com
 ```
 
 学校使用独立域名时，在 userscript 顶部新增对应的 `@match` 后重新保存。
@@ -115,7 +119,7 @@ flowchart LR
     H -->|"否"| G
 ```
 
-顶层控制器和每个 iframe 中的代理通过带会话令牌的 `postMessage` 通信。回填时会触发 `input`、`change` 和 `blur` 事件，以兼容依赖前端事件更新状态的题目页面。
+顶层控制器直接调用当前页面的扫描代理；只有子 iframe 使用带会话令牌的 `postMessage` 通信。回填时会触发 `input`、`change` 和 `blur` 事件，以兼容依赖前端事件更新状态的题目页面。
 
 模型必须返回一个 JSON 对象：
 
