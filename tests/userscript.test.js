@@ -79,6 +79,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
         }
         answer = { fillAnswers: ["巴黎", "4"] };
       } else if (/单元测试/.test(textPart)) answer = { shortAnswer: "单元测试可以验证行为并降低回归风险。" };
+      else if (/我国的首都/.test(textPart)) answer = { answerKeys: ["B"] };
       else if (/颜色/.test(textPart)) answer = { answerKeys: ["B"] };
       else answer = { answerKeys: ["A"] };
 
@@ -169,6 +170,7 @@ test("fills all common question types across an iframe and submits", async () =>
   assert.equal(await page.$eval("#judgement input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#fill input", (inputs) => inputs.map((input) => input.value)), ["巴黎", "4"]);
   assert.match(await page.$eval("#short textarea", (input) => input.value), /回归风险/);
+  assert.equal(await page.$eval("#custom-single .custom-option.selected .custom-key", (element) => element.textContent), "B");
   assert.equal(await child.$eval("input[value='B']", (input) => input.checked), true);
 
   const evidence = await page.evaluate(() => ({

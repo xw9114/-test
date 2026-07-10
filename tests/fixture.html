@@ -7,6 +7,9 @@
     body { font-family: sans-serif; padding: 20px; }
     .question-item { margin: 14px 0; padding: 12px; border: 1px solid #ccc; }
     label { display: block; margin: 5px 0; }
+    .custom-option { display: flex; gap: 10px; align-items: center; margin: 6px 0; cursor: pointer; }
+    .custom-key { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #ccd4df; border-radius: 50%; color: #283548; background: #fff; }
+    .custom-option.selected .custom-key { color: #fff; background: #4f74e8; }
     [role="dialog"] { display: none; position: fixed; inset: 30% 35%; padding: 20px; background: white; border: 2px solid #222; }
     [role="dialog"].open { display: block; }
     iframe { width: 100%; height: 230px; border: 1px solid #999; }
@@ -44,6 +47,16 @@
       <textarea></textarea>
     </section>
 
+    <section class="new-question-shell" id="custom-single">
+      <div class="custom-stem">6.（单选题）我国的首都是（ ）。</div>
+      <div class="custom-options">
+        <div class="custom-option"><span class="custom-key">A</span><span>上海</span></div>
+        <div class="custom-option"><span class="custom-key">B</span><span>北京</span></div>
+        <div class="custom-option"><span class="custom-key">C</span><span>广州</span></div>
+        <div class="custom-option"><span class="custom-key">D</span><span>深圳</span></div>
+      </div>
+    </section>
+
     <iframe title="cross origin questions" src="http://127.0.0.1:32102/frame.html"></iframe>
     <button id="submit">提交作业</button>
   </main>
@@ -57,6 +70,12 @@
     window.__events = { input: 0, change: 0 };
     document.addEventListener("input", () => { window.__events.input += 1; });
     document.addEventListener("change", () => { window.__events.change += 1; });
+    document.querySelectorAll("#custom-single .custom-option").forEach((option) => {
+      option.addEventListener("click", () => {
+        document.querySelectorAll("#custom-single .custom-option").forEach((item) => item.classList.remove("selected"));
+        option.classList.add("selected");
+      });
+    });
     document.querySelector("#submit").addEventListener("click", () => {
       document.querySelector("#confirm-dialog").classList.add("open");
     });
@@ -67,4 +86,3 @@
   </script>
 </body>
 </html>
-

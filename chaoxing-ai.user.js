@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.0
+// @version      1.0.1
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
+// @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
+// @updateURL    https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
 // @match        *://*.chaoxing.com/*
 // @match        *://*.chaoxing.cn/*
 // @match        *://*.chaoxing.net/*
@@ -53,6 +55,7 @@
   ].join(",");
   const CHOICE_CONTROL_SELECTOR = "input[type='radio'],input[type='checkbox']";
   const CONTROL_SELECTOR = `${CHOICE_CONTROL_SELECTOR},${TEXT_CONTROL_SELECTOR}`;
+  const QUESTION_STEM_PATTERN = /^\s*\d+\s*[.、)]\s*(?:[(（]\s*)?(?:单选题|多选题|判断题|填空题|简答题|问答题|论述题|single choice|multiple choice|true\s*\/\s*false|short answer)/i;
 
   const memoryStore = new Map();
   const gmGet = (key, fallback) => {
@@ -157,6 +160,99 @@
     return input.closest("label") || input.parentElement;
   }
 
+  function optionKeyOf(element) {
+    const match = textOf(element).match(/^\s*([A-H])\s*[.、:：)）]?\s*$/i);
+    return match?.[1]?.toUpperCase() || "";
+  }
+
+  function optionIndicators(root) {
+    return Array.from(root.querySelectorAll("span,div,i,b,em,label,button,a"))
+      .filter((element) => isVisible(element) && optionKeyOf(element));
+  }
+
+  function findCustomOptionRows(container) {
+    const rows = [];
+    const seenKeys = new Set();
+    for (const indicator of optionIndicators(container)) {
+      const key = optionKeyOf(indicator);
+      if (!key || seenKeys.has(key)) continue;
+      let row = indicator;
+      let current = indicator.parentElement;
+      while (current && current !== container) {
+        const keys = optionIndicators(current);
+        const text = textOf(current);
+        if (keys.length !== 1 || text.length > 1200) break;
+        row = current;
+        current = current.parentElement;
+      }
+      const rowText = textOf(row);
+      if (!rowText || rowText === key) continue;
+      let clickTarget = row;
+      let clickable = indicator;
+      while (clickable && row.contains(clickable)) {
+        const role = clickable.getAttribute("role");
+        if (clickable.hasAttribute("onclick") || role === "radio" || role === "checkbox" || getComputedStyle(clickable).cursor === "pointer") clickTarget = clickable;
+        if (clickable === row) break;
+        clickable = clickable.parentElement;
+      }
+      seenKeys.add(key);
+      rows.push({ key, indicator, row, clickTarget });
+    }
+    return rows.sort((left, right) => left.key.localeCompare(right.key)).slice(0, 12);
+  }
+
+  function discoverCustomQuestionContainers() {
+    const containers = new Set();
+    const stems = Array.from(document.querySelectorAll("div,p,li,h1,h2,h3,h4,h5,section"))
+      .filter((element) => {
+        if (!isVisible(element)) return false;
+        const text = textOf(element);
+        if (!QUESTION_STEM_PATTERN.test(text) || text.length > 2000) return false;
+        return !Array.from(element.children).some((child) => QUESTION_STEM_PATTERN.test(textOf(child)));
+      });
+    for (const stem of stems) {
+      let current = stem.parentElement;
+      while (current && current !== document.body) {
+        const options = findCustomOptionRows(current);
+        const textLength = textOf(current).length;
+        if (options.length >= 2 && options.length <= 12 && textLength <= 8000) {
+          containers.add(current);
+          break;
+        }
+        current = current.parentElement;
+      }
+    }
+    return Array.from(containers);
+  }
+
+  function parseCssColor(value) {
+    const match = String(value || "").match(/rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)(?:\D+([\d.]+))?/i);
+    return match ? { red: Number(match[1]), green: Number(match[2]), blue: Number(match[3]), alpha: match[4] == null ? 1 : Number(match[4]) } : null;
+  }
+
+  function customOptionSelected(option) {
+    const nodes = [option.indicator, option.clickTarget, option.row].filter(Boolean);
+    for (const node of nodes) {
+      const aria = node.getAttribute("aria-checked") || node.getAttribute("aria-selected");
+      if (aria === "true") return true;
+      if (aria === "false") return false;
+      const data = node.getAttribute("data-checked") || node.getAttribute("data-selected");
+      if (data === "true" || data === "1") return true;
+      if (data === "false" || data === "0") return false;
+      if (/(^|[-_\s])(selected|checked|active|on|cur)([-_\s]|$)/i.test(node.className || "")) return true;
+    }
+    const style = getComputedStyle(option.indicator);
+    const background = parseCssColor(style.backgroundColor);
+    const foreground = parseCssColor(style.color);
+    if (background && foreground && background.alpha > 0) {
+      const backgroundIsLight = background.red > 235 && background.green > 235 && background.blue > 235;
+      const foregroundIsLight = foreground.red > 225 && foreground.green > 225 && foreground.blue > 225;
+      if (!backgroundIsLight && foregroundIsLight) return true;
+      if (backgroundIsLight && !foregroundIsLight) return false;
+    }
+    return null;
+  }
+
   function extractImages(root) {
     const seen = new Set();
     const images = [];
@@ -219,6 +315,21 @@
     });
 
     if (options.length === 0) {
+      findCustomOptionRows(container).forEach(({ key, indicator, row, clickTarget }) => {
+        const rawText = textOf(row);
+        options.push({
+          key,
+          text: normalizeText(rawText.replace(new RegExp(`^\\s*${key}\\s*[.、:：)）]?\\s*`, "i"), "")),
+          images: extractImages(row),
+          input: null,
+          clickTarget,
+          indicator,
+          row,
+        });
+      });
+    }
+
+    if (options.length === 0) {
       const customSelectors = ".answerList li,.Py_answer li,.stem_answer li,.option,.answer-option,[role='radio'],[role='checkbox']";
       const custom = Array.from(container.querySelectorAll(customSelectors)).filter((element) => isVisible(element) && textOf(element).length > 0);
       custom.slice(0, 12).forEach((element, optionIndex) => {
@@ -230,12 +341,15 @@
           images: extractImages(element),
           input: null,
           clickTarget: element,
+          indicator: element,
+          row: element,
         });
       });
     }
 
     const stemSelectors = ".Zy_TItle,.Cy_TItle,.question-title,.questionTitle,.stem,.subject,.mark_name,.qtContent,.title";
-    const stemElement = Array.from(container.querySelectorAll(stemSelectors)).find((element) => textOf(element).length >= 2);
+    const stemElement = Array.from(container.querySelectorAll(stemSelectors)).find((element) => textOf(element).length >= 2)
+      || Array.from(container.querySelectorAll("div,p,li,h1,h2,h3,h4,h5,section")).find((element) => QUESTION_STEM_PATTERN.test(textOf(element)) && textOf(element).length <= 2000);
     let stem = textOf(stemElement);
     if (!stem) {
       stem = textOf(container);
@@ -337,8 +451,9 @@
         if (container) candidates.add(container);
       });
       document.querySelectorAll(QUESTION_CONTAINER_SELECTOR).forEach((container) => {
-        if (isVisible(container) && container.querySelector(CONTROL_SELECTOR)) candidates.add(container);
+        if (isVisible(container) && (container.querySelector(CONTROL_SELECTOR) || findCustomOptionRows(container).length >= 2)) candidates.add(container);
       });
+      discoverCustomQuestionContainers().forEach((container) => candidates.add(container));
       const minimal = Array.from(candidates).filter((candidate) => !Array.from(candidates).some((other) => other !== candidate && candidate.contains(other)));
       this.questionRefs.clear();
       const questions = [];
@@ -351,7 +466,7 @@
       return { frameId: this.frameId, url: location.href, title: document.title, questions };
     }
 
-    fill(questionId, answer) {
+    async fill(questionId, answer) {
       const record = this.questionRefs.get(questionId);
       if (!record) throw new Error("题目 DOM 已变化，请重新扫描");
       const { type } = record.serializable;
@@ -368,11 +483,25 @@
               option.input.checked = shouldSelect;
               dispatchValueEvents(option.input);
             }
-          } else if (shouldSelect) {
-            option.clickTarget.click();
+          } else {
+            const selected = customOptionSelected(option);
+            if (type === "multiple") {
+              if (selected == null) {
+                if (shouldSelect) option.clickTarget.click();
+              } else if (selected !== shouldSelect) {
+                option.clickTarget.click();
+              }
+            } else if (shouldSelect && selected !== true) {
+              option.clickTarget.click();
+            }
           }
         }
-        const selected = record.options.filter((option) => option.input ? option.input.checked : wanted.has(option.key)).map((option) => option.key);
+        await sleep(50);
+        const selected = record.options.filter((option) => {
+          if (option.input) return option.input.checked;
+          const state = customOptionSelected(option);
+          return state == null ? wanted.has(option.key) : state;
+        }).map((option) => option.key);
         if (selected.length !== wanted.size || Array.from(wanted).some((key) => !selected.includes(key))) throw new Error("选项回填校验失败");
       } else if (type === "fill") {
         const values = answer.fillAnswers || [];
