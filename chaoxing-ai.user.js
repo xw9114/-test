@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.1
+// @version      1.0.2
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
 // @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
@@ -277,6 +277,9 @@
   }
 
   function detectQuestionType(container, options, textControls) {
+    const chaoxingType = container.querySelector("input[name^='answertype']")?.value;
+    const chaoxingTypeMap = { "0": "single", "1": "multiple", "2": "fill", "3": "judgement", "4": "short", "5": "short", "6": "short", "7": "short", "9": "fill" };
+    if (chaoxingTypeMap[chaoxingType]) return chaoxingTypeMap[chaoxingType];
     const text = textOf(container);
     if (/多选题|multiple choice/i.test(text)) return "multiple";
     if (/判断题|true\s*\/\s*false|judg(?:e)?ment/i.test(text)) return "judgement";
@@ -301,7 +304,24 @@
     const textControls = Array.from(container.querySelectorAll(TEXT_CONTROL_SELECTOR)).filter((element) => isVisible(element) && element.getAttribute("type") !== "hidden");
     const options = [];
 
-    choiceInputs.forEach((input, optionIndex) => {
+    const homeworkOptions = Array.from(container.querySelectorAll(".answer_p")).filter((element) => textOf(element).length > 0);
+    homeworkOptions.forEach((answerElement, optionIndex) => {
+      const row = answerElement.closest("li") || answerElement.parentElement;
+      const input = row?.querySelector(CHOICE_CONTROL_SELECTOR) || null;
+      const indicator = row?.querySelector(".num_option") || answerElement;
+      const explicitKey = optionKeyOf(indicator) || String.fromCharCode(65 + optionIndex);
+      options.push({
+        key: explicitKey,
+        text: textOf(answerElement),
+        images: extractImages(answerElement),
+        input,
+        clickTarget: row?.querySelector(".answerBg") || input || row || answerElement,
+        indicator,
+        row: row || answerElement,
+      });
+    });
+
+    if (options.length === 0) choiceInputs.forEach((input, optionIndex) => {
       const label = labelForInput(input, container);
       const rawText = textOf(label) || normalizeText(input.value);
       const explicitKey = rawText.match(/^\s*([A-H])\s*[.、:：)）]?/i)?.[1]?.toUpperCase();
@@ -451,7 +471,10 @@
         if (container) candidates.add(container);
       });
       document.querySelectorAll(QUESTION_CONTAINER_SELECTOR).forEach((container) => {
-        if (isVisible(container) && (container.querySelector(CONTROL_SELECTOR) || findCustomOptionRows(container).length >= 2)) candidates.add(container);
+        const isChaoxingHomework = container.matches(".questionLi")
+          && container.querySelector(".mark_name")
+          && (container.querySelector(".answer_p") || container.querySelector(TEXT_CONTROL_SELECTOR));
+        if (isVisible(container) && (isChaoxingHomework || container.querySelector(CONTROL_SELECTOR) || findCustomOptionRows(container).length >= 2)) candidates.add(container);
       });
       discoverCustomQuestionContainers().forEach((container) => candidates.add(container));
       const minimal = Array.from(candidates).filter((candidate) => !Array.from(candidates).some((other) => other !== candidate && candidate.contains(other)));

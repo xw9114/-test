@@ -10,6 +10,10 @@
     .custom-option { display: flex; gap: 10px; align-items: center; margin: 6px 0; cursor: pointer; }
     .custom-key { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #ccd4df; border-radius: 50%; color: #283548; background: #fff; }
     .custom-option.selected .custom-key { color: #fff; background: #4f74e8; }
+    .questionLi input[type="radio"] { display: none; }
+    .answerBg { display: flex; gap: 10px; align-items: center; margin: 6px 0; cursor: pointer; }
+    .num_option { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #ccd4df; border-radius: 50%; }
+    .num_option.check_answer { color: #fff; background: #4f74e8; }
     [role="dialog"] { display: none; position: fixed; inset: 30% 35%; padding: 20px; background: white; border: 2px solid #222; }
     [role="dialog"].open { display: block; }
     iframe { width: 100%; height: 230px; border: 1px solid #999; }
@@ -57,6 +61,16 @@
       </div>
     </section>
 
+    <section class="questionLi" id="chaoxing-homework-single">
+      <div class="mark_name"><span>7.（单选题）</span>参考项目适配器应读取哪个固定选项节点？</div>
+      <input type="hidden" name="answertype7" value="0">
+      <ul>
+        <li><input type="radio" name="homework7"><div class="answerBg"><span class="num_option">A</span><p class="answer_p">随机 div</p></div></li>
+        <li><input type="radio" name="homework7"><div class="answerBg"><span class="num_option">B</span><p class="answer_p">answer_p</p></div></li>
+        <li><input type="radio" name="homework7"><div class="answerBg"><span class="num_option">C</span><p class="answer_p">mark_title</p></div></li>
+      </ul>
+    </section>
+
     <iframe title="cross origin questions" src="http://127.0.0.1:32102/frame.html"></iframe>
     <button id="submit">提交作业</button>
   </main>
@@ -74,6 +88,14 @@
       option.addEventListener("click", () => {
         document.querySelectorAll("#custom-single .custom-option").forEach((item) => item.classList.remove("selected"));
         option.classList.add("selected");
+      });
+    });
+    document.querySelectorAll("#chaoxing-homework-single .answerBg").forEach((option) => {
+      option.addEventListener("click", () => {
+        document.querySelectorAll("#chaoxing-homework-single .num_option").forEach((item) => item.classList.remove("check_answer"));
+        const input = option.closest("li").querySelector("input[type='radio']");
+        input.checked = true;
+        option.querySelector(".num_option").classList.add("check_answer");
       });
     });
     document.querySelector("#submit").addEventListener("click", () => {
