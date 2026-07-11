@@ -82,6 +82,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
       else if (/我国的首都/.test(textPart)) answer = { answerKeys: ["B"] };
       else if (/固定选项节点/.test(textPart)) answer = { answerKeys: ["B"] };
       else if (/复核测试/.test(textPart)) answer = /复核要求/.test(textPart) ? { answerKeys: ["B"] } : { answerKeys: ["A"] };
+      else if (/内容匹配测试/.test(textPart)) answer = { answerKeys: ["A"], answerTexts: ["东方"] };
       else if (/颜色/.test(textPart)) answer = { answerKeys: ["B"] };
       else answer = { answerKeys: ["A"] };
 
@@ -90,6 +91,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
         questionId,
         type,
         answerKeys: answer.answerKeys || [],
+        answerTexts: answer.answerTexts || [],
         fillAnswers: answer.fillAnswers || [],
         shortAnswer: answer.shortAnswer || "",
         explanation: "fixture explanation",
@@ -146,6 +148,11 @@ test.before(async () => {
       response.end("<!doctype html><meta charset='utf-8'><section class='question-item' id='verify'><h3 class='question-title'>1. 单选题：复核测试：太阳从哪个方向升起？</h3><label><input type='radio' name='verify' value='A'> A. 西方</label><label><input type='radio' name='verify' value='B'> B. 东方</label></section>");
       return;
     }
+    if (request.url.startsWith("/content-match")) {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><meta charset='utf-8'><section class='question-item' id='content-match'><h3 class='question-title'>1. 单选题：内容匹配测试：太阳从哪个方向升起？</h3><label><input type='radio' name='content-match' value='A'> A. 西方</label><label><input type='radio' name='content-match' value='B'> B. 东方</label></section>");
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end(FIXTURE);
   });
@@ -194,7 +201,7 @@ test("fills all common question types across an iframe and submits", async () =>
   await clickStart(page);
   await page.waitForFunction(() => document.documentElement.dataset.submitted === "true", { timeout: 15000 });
 
-  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.7/);
+  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.8/);
 
   assert.equal(await page.$eval("#single input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#multiple input:checked", (inputs) => inputs.map((input) => input.value)), ["A", "C"]);
@@ -298,5 +305,25 @@ test("verifies and corrects a low-quality first choice before filling", async ()
     return text.includes("复核测试");
   }).length, 2);
   assert.match(evidence.log, /复核修正/);
+  await page.close();
+});
+
+test("prefers matched answer text when model letter conflicts with option content", async () => {
+  const page = await browser.newPage();
+  await installMockEnvironment(page, { autoSubmit: false });
+  await injectUserscript(page);
+  await page.goto("http://127.0.0.1:32101/content-match", { waitUntil: "domcontentloaded" });
+  await clickStart(page);
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#cx-ai-panel-host")?.shadowRoot;
+    return root?.querySelector("#completed")?.textContent === "1";
+  }, { timeout: 8000 });
+  assert.equal(await page.$eval("#content-match input[value='B']", (input) => input.checked), true);
+  const evidence = await page.evaluate(() => ({
+    log: document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("#log").textContent,
+    bodies: globalThis.__mockApiBodies,
+  }));
+  assert.match(evidence.log, /按选项内容匹配为 B/);
+  assert.equal(evidence.bodies.length, 1, "high-confidence answerTexts should skip verification call");
   await page.close();
 });
