@@ -120,10 +120,12 @@ test.before(async () => {
         <input name="type-preview" value="3">
         <section class="questionLi" id="exam-judgement">
           <div class="mark_name"><span>1.（判断题）</span>考试预览判断题可以识别。</div>
-          <ul>
-            <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">A</span><span class="answer_p">对</span></div></li>
-            <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">B</span><span class="answer_p">错</span></div></li>
-          </ul>
+          <div class="question-item">
+            <ul>
+              <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">A</span><span class="answer_p">对</span></div></li>
+              <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">B</span><span class="answer_p">错</span></div></li>
+            </ul>
+          </div>
         </section>
         <script>document.querySelectorAll('.answerBg').forEach((option)=>option.addEventListener('click',()=>{document.querySelectorAll('input[type=radio]').forEach((input)=>input.checked=false);const input=option.closest('li').querySelector('input');input.checked=true;option.querySelector('.num_option').classList.add('check_answer')}));</script>`);
       return;
@@ -186,7 +188,7 @@ test("fills all common question types across an iframe and submits", async () =>
   await clickStart(page);
   await page.waitForFunction(() => document.documentElement.dataset.submitted === "true", { timeout: 15000 });
 
-  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.5/);
+  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.6/);
 
   assert.equal(await page.$eval("#single input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#multiple input:checked", (inputs) => inputs.map((input) => input.value)), ["A", "C"]);

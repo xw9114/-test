@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.5
+// @version      1.0.6
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
 // @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
@@ -26,7 +26,7 @@
   "use strict";
 
   const CHANNEL = "cx-ai-v1";
-  const SCRIPT_VERSION = "1.0.5";
+  const SCRIPT_VERSION = "1.0.6";
   const SETTINGS_KEY = "cxai_settings_v1";
   const RUN_KEY = "cxai_run_state_v1";
   const MAX_STEPS = 100;
@@ -522,11 +522,28 @@
       discoverChaoxingHomeworkContainers().forEach((container) => candidates.add(container));
       discoverCustomQuestionContainers().forEach((container) => candidates.add(container));
       const minimal = Array.from(candidates).filter((candidate) => !Array.from(candidates).some((other) => other !== candidate && candidate.contains(other)));
+      const ordered = Array.from(candidates).sort((left, right) => {
+        const priority = (element) => {
+          if (element.matches(".questionLi")) return 0;
+          if (element.querySelector(".mark_name") && element.querySelector(".answer_p")) return 1;
+          if (element.matches(QUESTION_CONTAINER_SELECTOR)) return 2;
+          return 3;
+        };
+        return priority(left) - priority(right) || textOf(left).length - textOf(right).length;
+      });
       this.questionRefs.clear();
       const questions = [];
-      minimal.forEach((container, index) => {
+      const acceptedContainers = [];
+      const signatures = new Set();
+      ordered.forEach((container, index) => {
         const record = buildQuestionRecord(container, this.frameId, index);
         if (!record.serializable.stem || record.serializable.type === "unknown") return;
+        if (["single", "multiple", "judgement"].includes(record.serializable.type) && record.serializable.options.length < 2) return;
+        if (["fill", "short"].includes(record.serializable.type) && record.serializable.blankCount < 1) return;
+        if (signatures.has(record.serializable.signature)) return;
+        if (acceptedContainers.some((accepted) => accepted.contains(container) || container.contains(accepted))) return;
+        signatures.add(record.serializable.signature);
+        acceptedContainers.push(container);
         this.questionRefs.set(record.serializable.questionId, record);
         questions.push(record.serializable);
       });
@@ -546,6 +563,7 @@
           nativeControls: document.querySelectorAll(CONTROL_SELECTOR).length,
           candidates: candidates.size,
           minimalCandidates: minimal.length,
+          validCandidates: questions.length,
           iframeCount: document.querySelectorAll("iframe").length,
           iframeSources: Array.from(document.querySelectorAll("iframe")).map((frame) => frame.src || "(无 src)").slice(0, 5),
           bodyTextLength: textOf(document.body).length,
@@ -1014,7 +1032,7 @@
       diagnostics.forEach((item) => {
         let host = item.url;
         try { host = new URL(item.url).host + new URL(item.url).pathname; } catch (_) {}
-        this.log(`扫描诊断 ${host}：questionLi=${item.questionLi} mark_name=${item.markName} answer_p=${item.answerP} answertype=${item.answerType} type=${item.typeFields} fontSecret=${item.fontSecret} TiMu=${item.timu} controls=${item.nativeControls} candidates=${item.candidates}/${item.minimalCandidates} iframes=${item.iframeCount} bodyText=${item.bodyTextLength}`);
+        this.log(`扫描诊断 ${host}：questionLi=${item.questionLi} mark_name=${item.markName} answer_p=${item.answerP} answertype=${item.answerType} type=${item.typeFields} fontSecret=${item.fontSecret} TiMu=${item.timu} controls=${item.nativeControls} candidates=${item.candidates}/${item.minimalCandidates}/${item.validCandidates} iframes=${item.iframeCount} bodyText=${item.bodyTextLength}`);
         if (item.iframeSources?.length) this.log(`iframe：${item.iframeSources.join(" | ")}`);
         if (item.stemSamples?.length) this.log(`题干样本：${item.stemSamples.join(" | ")}`);
       });
