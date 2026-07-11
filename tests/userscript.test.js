@@ -113,6 +113,21 @@ async function clickStart(page) {
 
 test.before(async () => {
   topServer = http.createServer((request, response) => {
+    if (request.url.startsWith("/exam-preview")) {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><meta charset="utf-8"><title>Exam preview fixture</title>
+        <style>input[type=radio]{display:none}.answerBg{cursor:pointer}.check_answer{background:#2563eb;color:white}</style>
+        <input name="type-preview" value="3">
+        <section class="questionLi" id="exam-judgement">
+          <div class="mark_name"><span>1.（判断题）</span>考试预览判断题可以识别。</div>
+          <ul>
+            <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">A</span><span class="answer_p">对</span></div></li>
+            <li><input type="radio" name="exam"><div class="answerBg"><span class="num_option">B</span><span class="answer_p">错</span></div></li>
+          </ul>
+        </section>
+        <script>document.querySelectorAll('.answerBg').forEach((option)=>option.addEventListener('click',()=>{document.querySelectorAll('input[type=radio]').forEach((input)=>input.checked=false);const input=option.closest('li').querySelector('input');input.checked=true;option.querySelector('.num_option').classList.add('check_answer')}));</script>`);
+      return;
+    }
     if (request.url.startsWith("/empty")) {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end("<!doctype html><meta charset='utf-8'><title>Empty fixture</title><main>没有题目的测试页面</main><iframe src='about:blank'></iframe>");
@@ -171,7 +186,7 @@ test("fills all common question types across an iframe and submits", async () =>
   await clickStart(page);
   await page.waitForFunction(() => document.documentElement.dataset.submitted === "true", { timeout: 15000 });
 
-  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.4/);
+  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.5/);
 
   assert.equal(await page.$eval("#single input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#multiple input:checked", (inputs) => inputs.map((input) => input.value)), ["A", "C"]);
@@ -231,5 +246,25 @@ test("prints selector and iframe diagnostics when no questions are found", async
   assert.match(log, /questionLi=0 mark_name=0 answer_p=0 answertype=0/);
   assert.match(log, /iframes=1/);
   assert.equal(await page.evaluate(() => globalThis.__mockApiBodies.length), 0);
+  await page.close();
+});
+
+test("reads exam preview type from the page-level type field", async () => {
+  const page = await browser.newPage();
+  await installMockEnvironment(page, { autoSubmit: false });
+  await injectUserscript(page);
+  await page.goto("http://127.0.0.1:32101/exam-preview", { waitUntil: "domcontentloaded" });
+  await clickStart(page);
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#cx-ai-panel-host")?.shadowRoot;
+    return root?.querySelector("#completed")?.textContent === "1";
+  }, { timeout: 8000 });
+  assert.equal(await page.$eval("#exam-judgement li:first-child input", (input) => input.checked), true);
+  const request = await page.evaluate(() => globalThis.__mockApiBodies.find((body) => {
+    const content = body.messages[1].content;
+    return (typeof content === "string" ? content : JSON.stringify(content)).includes("考试预览判断题");
+  }));
+  assert.ok(request);
+  assert.match(request.messages[1].content, /type: judgement/);
   await page.close();
 });

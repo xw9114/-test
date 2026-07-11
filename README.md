@@ -163,6 +163,7 @@ npm.cmd test
 测试使用两个本地 HTTP 端口模拟页面和跨域 iframe，并 mock `GM_xmlhttpRequest`。当前自动化场景覆盖：
 
 - 五种常见题型、学习通 `.mark_name/.answer_p/answertype` 作业结构、自定义 `div` 选项及跨域图片题回填。
+- 考试预览页通过页面级 `input[name^="type"]` 识别题型。
 - multimodal 图片请求、`response_format` 降级和无效 JSON 重试。
 - 输入事件触发、确认提交和伪造 iframe 消息拒绝。
 - API 超时后停止，且不回填、不提交。

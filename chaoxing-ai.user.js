@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chaoxing AI Answer Assistant
 // @namespace    local.codex.chaoxing-ai
-// @version      1.0.4
+// @version      1.0.5
 // @description  Extract Chaoxing questions, ask an OpenAI-compatible API, fill answers, and optionally submit.
 // @author       local
 // @downloadURL  https://raw.githubusercontent.com/xw9114/-test/main/chaoxing-ai.user.js
@@ -26,7 +26,7 @@
   "use strict";
 
   const CHANNEL = "cx-ai-v1";
-  const SCRIPT_VERSION = "1.0.4";
+  const SCRIPT_VERSION = "1.0.5";
   const SETTINGS_KEY = "cxai_settings_v1";
   const RUN_KEY = "cxai_run_state_v1";
   const MAX_STEPS = 100;
@@ -308,9 +308,16 @@
   }
 
   function detectQuestionType(container, options, textControls) {
-    const chaoxingType = container.querySelector("input[name^='answertype']")?.value;
     const chaoxingTypeMap = { "0": "single", "1": "multiple", "2": "fill", "3": "judgement", "4": "short", "5": "short", "6": "short", "7": "short", "9": "fill" };
+    const chaoxingType = container.querySelector("input[name^='answertype'],input[name^='type']")?.value;
     if (chaoxingTypeMap[chaoxingType]) return chaoxingTypeMap[chaoxingType];
+    if (container.matches(".questionLi") && /\/exam(?:-|\/)/i.test(location.pathname)) {
+      const pageTypes = Array.from(document.querySelectorAll("input[name^='type']"))
+        .map((input) => chaoxingTypeMap[input.value])
+        .filter(Boolean);
+      const distinctTypes = [...new Set(pageTypes)];
+      if (distinctTypes.length === 1) return distinctTypes[0];
+    }
     const text = textOf(container);
     if (/多选题|multiple choice/i.test(text)) return "multiple";
     if (/判断题|true\s*\/\s*false|judg(?:e)?ment/i.test(text)) return "judgement";
@@ -533,6 +540,8 @@
           markName: document.querySelectorAll(".mark_name").length,
           answerP: document.querySelectorAll(".answer_p").length,
           answerType: document.querySelectorAll("input[name^='answertype']").length,
+          typeFields: document.querySelectorAll("input[name^='type']").length,
+          fontSecret: document.querySelectorAll(".font-cxsecret").length,
           timu: document.querySelectorAll(".TiMu").length,
           nativeControls: document.querySelectorAll(CONTROL_SELECTOR).length,
           candidates: candidates.size,
@@ -540,6 +549,7 @@
           iframeCount: document.querySelectorAll("iframe").length,
           iframeSources: Array.from(document.querySelectorAll("iframe")).map((frame) => frame.src || "(无 src)").slice(0, 5),
           bodyTextLength: textOf(document.body).length,
+          stemSamples: Array.from(document.querySelectorAll(".mark_name")).map((element) => textOf(element).slice(0, 80)).slice(0, 3),
         },
       };
     }
@@ -1004,8 +1014,9 @@
       diagnostics.forEach((item) => {
         let host = item.url;
         try { host = new URL(item.url).host + new URL(item.url).pathname; } catch (_) {}
-        this.log(`扫描诊断 ${host}：questionLi=${item.questionLi} mark_name=${item.markName} answer_p=${item.answerP} answertype=${item.answerType} TiMu=${item.timu} controls=${item.nativeControls} candidates=${item.candidates}/${item.minimalCandidates} iframes=${item.iframeCount} bodyText=${item.bodyTextLength}`);
+        this.log(`扫描诊断 ${host}：questionLi=${item.questionLi} mark_name=${item.markName} answer_p=${item.answerP} answertype=${item.answerType} type=${item.typeFields} fontSecret=${item.fontSecret} TiMu=${item.timu} controls=${item.nativeControls} candidates=${item.candidates}/${item.minimalCandidates} iframes=${item.iframeCount} bodyText=${item.bodyTextLength}`);
         if (item.iframeSources?.length) this.log(`iframe：${item.iframeSources.join(" | ")}`);
+        if (item.stemSamples?.length) this.log(`题干样本：${item.stemSamples.join(" | ")}`);
       });
     }
 
