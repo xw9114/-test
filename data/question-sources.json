@@ -1,0 +1,30 @@
+﻿[
+  {
+    "name": "HFUT_XC_Study_Things",
+    "repo": "Tuning-Luna/HFUT_XC_Study_Things",
+    "url": "https://github.com/Tuning-Luna/HFUT_XC_Study_Things",
+    "focus": ["思法619题", "形势与政策", "思政教材"],
+    "priority": 1
+  },
+  {
+    "name": "Introduction-to-Mao-Zedong-Thought",
+    "repo": "CSfufu/Introduction-to-Mao-Zedong-Thought",
+    "url": "https://github.com/CSfufu/Introduction-to-Mao-Zedong-Thought",
+    "focus": ["毛概2018版", "毛概2021版", "历年卷", "刷题整理"],
+    "priority": 1
+  },
+  {
+    "name": "HITSA-Courses-Xmind-Note",
+    "repo": "MasterYip/HITSA-Courses-Xmind-Note",
+    "url": "https://github.com/MasterYip/HITSA-Courses-Xmind-Note",
+    "focus": ["毛概", "马原", "近代史", "思维导图", "考试资料"],
+    "priority": 2
+  },
+  {
+    "name": "Hust-opensource-Xuejie",
+    "repo": "SukunaShinmyoumaru-hust/Hust-opensource-Xuejie",
+    "url": "https://github.com/SukunaShinmyoumaru-hust/Hust-opensource-Xuejie",
+    "focus": ["华科课程资料", "后续按思政目录筛选"],
+    "priority": 3
+  }
+]

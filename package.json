@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "collect": "node index.js",
+    "bank:serve": "node scripts/question-bank-server.js",
+    "bank:serve:sample": "node scripts/question-bank-server.js data/question-bank.sample.json",
     "test": "node --check index.js && node --check chaoxing-ai.user.js && node --test tests/userscript.test.js"
   },
   "keywords": [],

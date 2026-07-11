@@ -1,0 +1,18 @@
+﻿[
+  {
+    "id": "sample-politics-innovation",
+    "subject": "思政",
+    "source": "sample",
+    "type": "single",
+    "question": "建设创新型国家，要把增强（ ）作为发展科学技术的战略基点。",
+    "options": [
+      { "key": "A", "text": "吸引外资的能力" },
+      { "key": "B", "text": "购买外国先进技术的能力" },
+      { "key": "C", "text": "自主创新能力" },
+      { "key": "D", "text": "爱国主义精神" }
+    ],
+    "answerKeys": ["C"],
+    "answerTexts": ["自主创新能力"],
+    "confidence": 0.98
+  }
+]

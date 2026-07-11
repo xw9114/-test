@@ -5,6 +5,7 @@
   <p>
     <a href="#快速开始">快速开始</a> ·
     <a href="#能力概览">能力概览</a> ·
+    <a href="#本地题库">本地题库</a> ·
     <a href="#工作流程">工作流程</a> ·
     <a href="#开发与测试">开发与测试</a>
   </p>
@@ -19,6 +20,7 @@
 | 遍历当前页面和题目 iframe | ✓ | ✓ |
 | 单选、多选、判断、填空、简答 | ✓ | ✓ |
 | 提取题干、选项、公式和图片 | ✓ | ✓ |
+| 本地题库优先命中 | ✓ | — |
 | 调用 OpenAI 兼容 API | ✓ | — |
 | 二次复核模型答案 | ✓ | — |
 | 自动回填、翻页和提交 | ✓ | — |
@@ -99,6 +101,9 @@ practice-YYYYMMDD-HHMMSS.html
 | API Base URL | `https://api.openai.com/v1` | 可填写到 `/v1` 或完整 `/chat/completions` 地址 |
 | API Key | 空 | 通过 `Authorization: Bearer ...` 发送 |
 | Model | `gpt-4.1-mini` | 图片题需要选择支持视觉输入的模型 |
+| 题库 API URL | 空 | 例如 `http://127.0.0.1:32109/query`；命中题库时不调用模型 |
+| 题库 API Key | 空 | 可选，通过 `Authorization: Bearer ...` 发送 |
+| 题库优先 | 开启 | 仅在填写题库 API URL 后生效 |
 | 并发数 | `2` | 可配置范围为 1–6 |
 | 超时 | `60000 ms` | 单次 API 请求超时 |
 | 最低置信度 | `0.70` | 低于该值时停止自动流程 |
@@ -124,6 +129,64 @@ API Key 不写入学习通页面的 `localStorage`，运行日志也不会输出
 - 选择/判断题限制较小的 `max_tokens`，简答题才放宽输出长度。
 - 高置信度且 `answerTexts` 可明确匹配时不做第二次复核。
 - 同一题签名命中缓存时不再调用模型。
+
+## 本地题库
+
+网页脚本支持先查本地题库 API，命中后直接回填并写入缓存；未命中、冲突或接口失败时再调用 DeepSeek/OpenAI 兼容模型。
+
+### 资料来源清单
+
+`data/question-sources.json` 已记录这些候选来源：
+
+- `Tuning-Luna/HFUT_XC_Study_Things`
+- `CSfufu/Introduction-to-Mao-Zedong-Thought`
+- `MasterYip/HITSA-Courses-Xmind-Note`
+- `SukunaShinmyoumaru-hust/Hust-opensource-Xuejie`
+
+建议先下载或克隆其中与思政、毛概、马原、思法、形势政策相关的 PDF/DOCX/MD/HTML 文件，不要把整仓库大文件提交进本项目。
+
+### 清洗为统一题库
+
+```powershell
+python scripts/import-politics-sources.py "D:\question-sources\HFUT_XC_Study_Things" "D:\question-sources\Introduction-to-Mao-Zedong-Thought" --out data/question-bank.json
+```
+
+清洗脚本支持 `.pdf`、`.docx`、`.md`、`.txt`、`.html`，只保留带显式“答案/参考答案/正确答案”的客观题。复杂排版 PDF 可能需要人工校对。
+
+统一题库格式示例：
+
+```text
+data/question-bank.sample.json
+```
+
+### 启动本地查询 API
+
+先用示例验证：
+
+```powershell
+npm.cmd run bank:serve:sample
+```
+
+正式题库：
+
+```powershell
+npm.cmd run bank:serve
+```
+
+默认接口：
+
+```text
+http://127.0.0.1:32109/query
+```
+
+在学习通页面右侧面板填写：
+
+```text
+题库 API URL = http://127.0.0.1:32109/query
+题库优先 = 开启
+```
+
+题库命中时日志会显示“题库命中”，并且不会调用模型；题库未命中、冲突或接口失败时自动 fallback 到 AI。
 
 ## 工作流程
 

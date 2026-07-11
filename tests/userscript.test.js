@@ -26,12 +26,15 @@ function close(server) {
   return new Promise((resolve) => server.close(resolve));
 }
 
-function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {}) {
-  return page.evaluateOnNewDocument((timeoutMode, shouldSubmit) => {
+function installMockEnvironment(page, { timeout = false, autoSubmit = true, questionBank = false } = {}) {
+  return page.evaluateOnNewDocument((timeoutMode, shouldSubmit, useQuestionBank) => {
     const settings = {
       baseUrl: "https://mock.openai.local/v1",
       apiKey: "test-key",
       model: "mock-vision-model",
+      questionBankUrl: useQuestionBank ? "https://mock.question-bank.local/query" : "",
+      questionBankKey: useQuestionBank ? "bank-key" : "",
+      useQuestionBank,
       timeoutMs: 1000,
       concurrency: 2,
       confidenceThreshold: 0.7,
@@ -42,6 +45,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
     globalThis.GM_setValue = (key, value) => store.set(key, value);
     globalThis.confirm = () => true;
     globalThis.__mockApiBodies = [];
+    globalThis.__mockBankBodies = [];
     globalThis.__questionAttempts = {};
     globalThis.GM_xmlhttpRequest = (options) => {
       if (options.method === "GET") {
@@ -53,6 +57,18 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
         return;
       }
       const body = JSON.parse(options.data);
+      if (options.url.includes("mock.question-bank.local")) {
+        globalThis.__mockBankBodies.push(body);
+        if (/题库命中测试/.test(body.question)) {
+          setTimeout(() => options.onload({
+            status: 200,
+            responseText: JSON.stringify({ hit: true, answerTexts: ["自主创新能力"], confidence: 0.98, source: "fixture-bank" }),
+          }), 5);
+          return;
+        }
+        setTimeout(() => options.onload({ status: 200, responseText: JSON.stringify({ hit: false }) }), 5);
+        return;
+      }
       globalThis.__mockApiBodies.push(body);
       const userContent = body.messages[1].content;
       const textPart = typeof userContent === "string"
@@ -102,7 +118,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
         responseText: JSON.stringify({ choices: [{ message: { content } }], usage: { total_tokens: 10 } }),
       }), 5);
     };
-  }, timeout, autoSubmit);
+  }, timeout, autoSubmit, questionBank);
 }
 
 async function injectUserscript(page) {
@@ -151,6 +167,11 @@ test.before(async () => {
     if (request.url.startsWith("/content-match")) {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end("<!doctype html><meta charset='utf-8'><section class='question-item' id='content-match'><h3 class='question-title'>1. 单选题：内容匹配测试：太阳从哪个方向升起？</h3><label><input type='radio' name='content-match' value='A'> A. 西方</label><label><input type='radio' name='content-match' value='B'> B. 东方</label></section>");
+      return;
+    }
+    if (request.url.startsWith("/bank-hit")) {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><meta charset='utf-8'><section class='question-item' id='bank-hit'><h3 class='question-title'>1. 单选题：题库命中测试：建设创新型国家，要把增强（ ）作为战略基点。</h3><label><input type='radio' name='bank' value='A'> A. 吸引外资的能力</label><label><input type='radio' name='bank' value='B'> B. 购买外国先进技术的能力</label><label><input type='radio' name='bank' value='C'> C. 自主创新能力</label><label><input type='radio' name='bank' value='D'> D. 爱国主义精神</label></section>");
       return;
     }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -325,5 +346,27 @@ test("prefers matched answer text when model letter conflicts with option conten
   }));
   assert.match(evidence.log, /按选项内容匹配为 B/);
   assert.equal(evidence.bodies.length, 1, "high-confidence answerTexts should skip verification call");
+  await page.close();
+});
+
+test("uses question bank hit before calling the model", async () => {
+  const page = await browser.newPage();
+  await installMockEnvironment(page, { autoSubmit: false, questionBank: true });
+  await injectUserscript(page);
+  await page.goto("http://127.0.0.1:32101/bank-hit", { waitUntil: "domcontentloaded" });
+  await clickStart(page);
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#cx-ai-panel-host")?.shadowRoot;
+    return root?.querySelector("#completed")?.textContent === "1";
+  }, { timeout: 8000 });
+  assert.equal(await page.$eval("#bank-hit input[value='C']", (input) => input.checked), true);
+  const evidence = await page.evaluate(() => ({
+    bankBodies: globalThis.__mockBankBodies,
+    apiBodies: globalThis.__mockApiBodies,
+    log: document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("#log").textContent,
+  }));
+  assert.equal(evidence.bankBodies.length, 1);
+  assert.equal(evidence.apiBodies.length, 0);
+  assert.match(evidence.log, /题库命中/);
   await page.close();
 });

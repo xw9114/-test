@@ -37,6 +37,9 @@
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
     model: "gpt-4.1-mini",
+    questionBankUrl: "",
+    questionBankKey: "",
+    useQuestionBank: true,
     timeoutMs: 60000,
     concurrency: 2,
     confidenceThreshold: 0.7,
@@ -841,6 +844,41 @@
     return answer;
   }
 
+  function splitAnswerText(value) {
+    if (Array.isArray(value)) return value.map((item) => normalizeText(item)).filter(Boolean);
+    return normalizeText(value)
+      .split(/\s*(?:#|,|，|;|；|\||、|\n)\s*/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean);
+  }
+
+  function normalizeQuestionBankResponse(question, payload) {
+    const root = payload?.data && typeof payload.data === "object" ? payload.data : payload;
+    if (!root || typeof root !== "object") throw new Error("题库响应不是对象");
+    const rawAnswer = root.answer ?? root.answers ?? root.result ?? root.value ?? root.msg ?? "";
+    const answerParts = [
+      ...splitAnswerText(root.answerTexts || root.answer_texts || root.answerText),
+      ...splitAnswerText(rawAnswer),
+    ];
+    const validKeys = new Set(question.options.map((option) => option.key.toUpperCase()));
+    const answerKeys = Array.from(new Set([
+      ...(Array.isArray(root.answerKeys) ? root.answerKeys : []),
+      ...(Array.isArray(root.answer_keys) ? root.answer_keys : []),
+      ...answerParts.filter((part) => /^[A-H]$/i.test(part)),
+    ].map((key) => String(key).trim().toUpperCase()).filter((key) => validKeys.has(key))));
+    const answerTexts = answerParts.filter((part) => !/^[A-H]$/i.test(part));
+    return {
+      questionId: question.questionId,
+      type: question.type,
+      answerKeys,
+      answerTexts,
+      fillAnswers: ["fill"].includes(question.type) ? answerParts : [],
+      shortAnswer: question.type === "short" ? answerParts.join("\n") : "",
+      explanation: `题库命中${root.source ? `：${root.source}` : ""}`,
+      confidence: Number(root.confidence || root.score || 0.96),
+    };
+  }
+
   class ControlPanel {
     constructor(controller) {
       this.controller = controller;
@@ -892,10 +930,13 @@
             <label>API Base URL<input id="baseUrl" value="${this.escape(settings.baseUrl)}" autocomplete="off"></label>
             <label>API Key<input id="apiKey" type="password" value="${this.escape(settings.apiKey)}" autocomplete="off"></label>
             <label>Model<input id="model" value="${this.escape(settings.model)}" autocomplete="off"></label>
+            <label>题库 API URL<input id="questionBankUrl" value="${this.escape(settings.questionBankUrl || "")}" autocomplete="off" placeholder="http://127.0.0.1:32109/query"></label>
+            <label>题库 API Key<input id="questionBankKey" type="password" value="${this.escape(settings.questionBankKey || "")}" autocomplete="off"></label>
             <div class="grid">
               <label>并发数<input id="concurrency" type="number" min="1" max="6" value="${settings.concurrency}"></label>
               <label>超时（毫秒）<input id="timeoutMs" type="number" min="1000" step="1000" value="${settings.timeoutMs}"></label>
               <label>最低置信度<input id="confidence" type="number" min="0" max="1" step="0.05" value="${settings.confidenceThreshold}"></label>
+              <label>题库优先<span class="check"><input id="useQuestionBank" type="checkbox" ${settings.useQuestionBank !== false ? "checked" : ""}>命中题库则不问 AI</span></label>
               <label>准确率优先<span class="check"><input id="verifyAnswers" type="checkbox" ${settings.verifyAnswers !== false ? "checked" : ""}>智能复核答案</span></label>
               <label>执行方式<span class="check"><input id="autoSubmit" type="checkbox" ${settings.autoSubmit ? "checked" : ""}>自动翻页并提交</span></label>
             </div>
@@ -932,6 +973,9 @@
         baseUrl: this.root.querySelector("#baseUrl").value.trim(),
         apiKey: this.root.querySelector("#apiKey").value.trim(),
         model: this.root.querySelector("#model").value.trim(),
+        questionBankUrl: this.root.querySelector("#questionBankUrl").value.trim(),
+        questionBankKey: this.root.querySelector("#questionBankKey").value.trim(),
+        useQuestionBank: this.root.querySelector("#useQuestionBank").checked,
         concurrency: Math.min(6, Math.max(1, Number(this.root.querySelector("#concurrency").value) || 2)),
         timeoutMs: Math.max(1000, Number(this.root.querySelector("#timeoutMs").value) || 60000),
         confidenceThreshold: Math.min(1, Math.max(0, Number(this.root.querySelector("#confidence").value) || 0)),
@@ -1279,9 +1323,55 @@
       return false;
     }
 
+    async queryQuestionBank(question) {
+      if (!this.settings.useQuestionBank || !this.settings.questionBankUrl) return null;
+      const trimmed = this.settings.questionBankUrl.replace(/\/+$/, "");
+      const url = /\/query$/i.test(trimmed) ? trimmed : `${trimmed}/query`;
+      const payload = {
+        questionId: question.questionId,
+        signature: question.signature,
+        type: question.type,
+        question: question.stem,
+        options: question.options.map((option) => ({ key: option.key, text: option.text })),
+        blankCount: question.blankCount,
+      };
+      try {
+        const response = await gmRequest({
+          method: "POST",
+          url,
+          timeout: Math.min(this.settings.timeoutMs, 12000),
+          headers: {
+            "Content-Type": "application/json",
+            ...(this.settings.questionBankKey ? { Authorization: `Bearer ${this.settings.questionBankKey}` } : {}),
+          },
+          data: JSON.stringify(payload),
+        });
+        let body;
+        try {
+          body = JSON.parse(response.responseText || "{}");
+        } catch (_) {
+          throw new Error(`题库返回非 JSON（HTTP ${response.status}）`);
+        }
+        if (response.status < 200 || response.status >= 300) throw new Error(body?.error || body?.message || `HTTP ${response.status}`);
+        const hit = body.hit ?? body.found ?? Boolean(body.answer || body.answers || body.data?.answer || body.data?.answers || body.answerTexts || body.data?.answerTexts);
+        if (!hit) return null;
+        const answer = validateAnswer(question, normalizeQuestionBankResponse(question, body));
+        answer.explanation = answer.explanation || "题库命中";
+        return answer;
+      } catch (error) {
+        this.log(`题库查询失败，改用 AI：${error.message}`);
+        return null;
+      }
+    }
+
     async answerQuestion(question) {
       const cached = this.getCachedAnswer(question);
       if (cached) return cached;
+      const bankAnswer = await this.queryQuestionBank(question);
+      if (bankAnswer) {
+        this.setCachedAnswer(question, bankAnswer);
+        return bankAnswer;
+      }
       const imageInputs = [];
       const allImages = [...question.images, ...question.options.flatMap((option) => option.images || [])];
       const uniqueImages = Array.from(new Map(allImages.map((image) => [`${image.src}|${image.alt}`, image])).values());
