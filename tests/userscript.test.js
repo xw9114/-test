@@ -81,6 +81,7 @@ function installMockEnvironment(page, { timeout = false, autoSubmit = true } = {
       } else if (/单元测试/.test(textPart)) answer = { shortAnswer: "单元测试可以验证行为并降低回归风险。" };
       else if (/我国的首都/.test(textPart)) answer = { answerKeys: ["B"] };
       else if (/固定选项节点/.test(textPart)) answer = { answerKeys: ["B"] };
+      else if (/复核测试/.test(textPart)) answer = /复核要求/.test(textPart) ? { answerKeys: ["B"] } : { answerKeys: ["A"] };
       else if (/颜色/.test(textPart)) answer = { answerKeys: ["B"] };
       else answer = { answerKeys: ["A"] };
 
@@ -140,6 +141,11 @@ test.before(async () => {
       response.end("<!doctype html><meta charset='utf-8'><section class='question-item'><h3 class='question-title'>单选题：超时测试</h3><label><input type='radio' name='q'>A. A</label><label><input type='radio' name='q'>B. B</label></section>");
       return;
     }
+    if (request.url.startsWith("/verify")) {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><meta charset='utf-8'><section class='question-item' id='verify'><h3 class='question-title'>1. 单选题：复核测试：太阳从哪个方向升起？</h3><label><input type='radio' name='verify' value='A'> A. 西方</label><label><input type='radio' name='verify' value='B'> B. 东方</label></section>");
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end(FIXTURE);
   });
@@ -188,7 +194,7 @@ test("fills all common question types across an iframe and submits", async () =>
   await clickStart(page);
   await page.waitForFunction(() => document.documentElement.dataset.submitted === "true", { timeout: 15000 });
 
-  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.6/);
+  assert.match(await page.evaluate(() => document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("h2").textContent), /v1\.0\.7/);
 
   assert.equal(await page.$eval("#single input[value='A']", (input) => input.checked), true);
   assert.deepEqual(await page.$$eval("#multiple input:checked", (inputs) => inputs.map((input) => input.value)), ["A", "C"]);
@@ -268,5 +274,29 @@ test("reads exam preview type from the page-level type field", async () => {
   }));
   assert.ok(request);
   assert.match(request.messages[1].content, /type: judgement/);
+  await page.close();
+});
+
+test("verifies and corrects a low-quality first choice before filling", async () => {
+  const page = await browser.newPage();
+  await installMockEnvironment(page, { autoSubmit: false });
+  await injectUserscript(page);
+  await page.goto("http://127.0.0.1:32101/verify", { waitUntil: "domcontentloaded" });
+  await clickStart(page);
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#cx-ai-panel-host")?.shadowRoot;
+    return root?.querySelector("#completed")?.textContent === "1";
+  }, { timeout: 8000 });
+  assert.equal(await page.$eval("#verify input[value='B']", (input) => input.checked), true);
+  const evidence = await page.evaluate(() => ({
+    bodies: globalThis.__mockApiBodies,
+    log: document.querySelector("#cx-ai-panel-host").shadowRoot.querySelector("#log").textContent,
+  }));
+  assert.equal(evidence.bodies.filter((body) => {
+    const content = body.messages[1].content;
+    const text = typeof content === "string" ? content : content.find((part) => part.type === "text")?.text || "";
+    return text.includes("复核测试");
+  }).length, 2);
+  assert.match(evidence.log, /复核修正/);
   await page.close();
 });
